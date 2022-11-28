@@ -22,7 +22,7 @@ import (
 	"net"
 	"time"
 
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
@@ -60,7 +60,7 @@ func (c *conn) Write(data []byte) (n int, err error) {
 		},
 	}
 
-	klog.V(5).InfoS("[tracing] send req", "type", req.Type)
+	klog.V(5).Info("[tracing] send req", "type", req.Type)
 
 	err = c.stream.Send(req)
 	if err != nil {
@@ -145,7 +145,7 @@ func (c *conn) Close() error {
 		}
 	}
 
-	klog.V(5).InfoS("[tracing] send req", "type", req.Type)
+	klog.V(5).Info("[tracing] send req", "type", req.Type)
 
 	if err := c.stream.Send(req); err != nil {
 		return err

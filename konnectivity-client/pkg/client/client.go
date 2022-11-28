@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"k8s.io/klog/v2"
+	"k8s.io/klog"
 	"sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client"
 )
 
@@ -205,11 +205,11 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			return
 		}
 		if err != nil || pkt == nil {
-			klog.ErrorS(err, "stream read failure")
+			klog.Error(err, "stream read failure")
 			return
 		}
 
-		klog.V(5).InfoS("[tracing] recv packet", "type", pkt.Type)
+		klog.V(5).Info("[tracing] recv packet", "type", pkt.Type)
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_RSP:
@@ -222,11 +222,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
 				//
 				// In either scenario, we should return here and close the tunnel as it is no longer needed.
-				kvs := []interface{}{"dialID", resp.Random, "connectID", resp.ConnectID}
-				if resp.Error != "" {
-					kvs = append(kvs, "error", resp.Error)
-				}
-				klog.V(1).InfoS("DialResp not recognized; dropped", kvs...)
+				klog.V(1).Info("DialResp not recognized; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 				return
 			}
 
@@ -242,10 +238,10 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				// Note: this condition can only be hit by a race condition where the
 				// DialContext() returns early (timeout) after the pendingDial is already
 				// fetched here, but before the result is sent.
-				klog.V(1).InfoS("Pending dial has been cancelled; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				klog.V(1).Info("Pending dial has been cancelled; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 				return
 			case <-tunnelCtx.Done():
-				klog.V(1).InfoS("Tunnel has been closed; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
+				klog.V(1).Info("Tunnel has been closed; dropped", "connectionID", resp.ConnectID, "dialID", resp.Random)
 				return
 			}
 
@@ -264,7 +260,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 				//   2. grpcTunnel.DialContext() returned early due to a dial timeout or the client canceling the context
 				//
 				// In either scenario, we should return here and close the tunnel as it is no longer needed.
-				klog.V(1).InfoS("DIAL_CLS after dial finished", "dialID", resp.Random)
+				klog.V(1).Info("DIAL_CLS after dial finished", "dialID", resp.Random)
 			} else {
 				result := dialResult{
 					err: &dialFailure{"dial closed", DialFailureDialClosed},
@@ -286,7 +282,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			conn, ok := t.conns.get(resp.ConnectID)
 
 			if !ok {
-				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				klog.V(1).Info("Connection not recognized", "connectionID", resp.ConnectID)
 				continue
 			}
 			timer := time.NewTimer((time.Duration)(t.readTimeoutSeconds) * time.Second)
@@ -294,10 +290,10 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			case conn.readCh <- resp.Data:
 				timer.Stop()
 			case <-timer.C:
-				klog.ErrorS(fmt.Errorf("timeout"), "readTimeout has been reached, the grpc connection to the proxy server will be closed", "connectionID", conn.connID, "readTimeoutSeconds", t.readTimeoutSeconds)
+				klog.Error(fmt.Errorf("timeout"), "readTimeout has been reached, the grpc connection to the proxy server will be closed", "connectionID", conn.connID, "readTimeoutSeconds", t.readTimeoutSeconds)
 				return
 			case <-tunnelCtx.Done():
-				klog.V(1).InfoS("Tunnel has been closed, the grpc connection to the proxy server will be closed", "connectionID", conn.connID)
+				klog.V(1).Info("Tunnel has been closed, the grpc connection to the proxy server will be closed", "connectionID", conn.connID)
 			}
 
 		case client.PacketType_CLOSE_RSP:
@@ -305,7 +301,7 @@ func (t *grpcTunnel) serve(tunnelCtx context.Context) {
 			conn, ok := t.conns.get(resp.ConnectID)
 
 			if !ok {
-				klog.V(1).InfoS("Connection not recognized", "connectionID", resp.ConnectID)
+				klog.V(1).Info("Connection not recognized", "connectionID", resp.ConnectID)
 				continue
 			}
 			close(conn.readCh)
@@ -352,7 +348,7 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 			},
 		},
 	}
-	klog.V(5).InfoS("[tracing] send packet", "type", req.Type)
+	klog.V(5).Info("[tracing] send packet", "type", req.Type)
 
 	err := t.stream.Send(req)
 	if err != nil {
@@ -377,15 +373,15 @@ func (t *grpcTunnel) DialContext(requestCtx context.Context, protocol, address s
 		c.closeCh = make(chan string, 1)
 		t.conns.add(res.connid, c)
 	case <-time.After(30 * time.Second):
-		klog.V(5).InfoS("Timed out waiting for DialResp", "dialID", random)
+		klog.V(5).Info("Timed out waiting for DialResp", "dialID", random)
 		go t.closeDial(random)
 		return nil, &dialFailure{"dial timeout, backstop", DialFailureTimeout}
 	case <-requestCtx.Done():
-		klog.V(5).InfoS("Context canceled waiting for DialResp", "ctxErr", requestCtx.Err(), "dialID", random)
+		klog.V(5).Info("Context canceled waiting for DialResp", "ctxErr", requestCtx.Err(), "dialID", random)
 		go t.closeDial(random)
 		return nil, &dialFailure{"dial timeout, context", DialFailureContext}
 	case <-t.done:
-		klog.V(5).InfoS("Tunnel closed while waiting for DialResp", "dialID", random)
+		klog.V(5).Info("Tunnel closed while waiting for DialResp", "dialID", random)
 		return nil, &dialFailure{"tunnel closed", DialFailureTunnelClosed}
 	}
 
@@ -407,7 +403,7 @@ func (t *grpcTunnel) closeDial(dialID int64) {
 		},
 	}
 	if err := t.stream.Send(req); err != nil {
-		klog.V(5).InfoS("Failed to send DIAL_CLS", "err", err, "dialID", dialID)
+		klog.V(5).Info("Failed to send DIAL_CLS", "err", err, "dialID", dialID)
 	}
 	t.closeTunnel()
 }
